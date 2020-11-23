@@ -13,4 +13,4 @@ class Config {
 Config::$dbName = 'sqlite:../db/packages.sqlite3';
 Config::$packageDir = __DIR__ . '/../packagefiles/';
 Config::$apiKey = 'ChangeThisKey';
-Config::$defaultSortOrder = 'DownloadCount desc, Id';
+Config::$defaultSortOrder = 'Id asc'; // To accomodate ChocolateyGUI
