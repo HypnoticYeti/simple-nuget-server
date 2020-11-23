@@ -109,7 +109,14 @@ class DB {
 				break;
 
 			default:
-				throw new Exception('Unknown filter "' . $params['filter'] . '"');
+				// ChocolateyGUI uses this filter, accomodate for it
+        preg_match('/\(tolower\(Id\) eq \'(.*)\'\) and IsLatestVersion/', $params['filter'], $output_array);
+        if(count($output_array) == 2) {
+          $where .= ' AND versions.Version = packages.LatestVersion';
+          $where .= ' AND packages.PackageId = LOWER( \'' . $output_array[1] . '\' )'; 
+        } else {
+          throw new Exception('Unknown filter "' . $params['filter'] . '"');
+        }
 		}
 
 		$order = static::parseOrderBy($params['orderBy']);
