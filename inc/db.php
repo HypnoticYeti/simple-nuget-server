@@ -70,7 +70,8 @@ class DB {
 		$query_params = [];
 		$where = '1=1';
 		$pagination = '';
-
+		$searchDefault = true; // Indication whether or not to perform default search (packages.PackageId, packages.Title and versions.Tags)
+		
 		// Defaults
 		if (empty($params['orderBy'])) {
 			$params['orderBy'] = Config::$defaultSortOrder;
@@ -79,12 +80,7 @@ class DB {
 		if (!$params['includePrerelease']) {
 			$where .= ' AND IsPrerelease = 0';
 		}
-		if (!empty($params['searchQuery'])) {
-			$where .= ' AND
-				(packages.Title LIKE :searchQuery
-				OR packages.PackageId LIKE :searchQuery)';
-			$query_params['searchQuery'] = '%' . $params['searchQuery'] . '%';
-		}
+
 		if (!empty($params['top'])) {
 			// Have some attempt at checking valid values
 			$int = intval($params['top']);
@@ -92,6 +88,7 @@ class DB {
 				$pagination .= ' LIMIT ' . $int;
 			}
 		}
+		
 		if (!empty($params['offset'])) {
 			$int = intval($params['offset']);
 			if ($int > 0) {
@@ -109,18 +106,63 @@ class DB {
 				break;
 
 			default:
-				// ChocolateyGUI uses this filter, accomodate for it
+				// ChocolateyGUI and Chocolatey CLI use these filters, accomodate for them
         preg_match('/\(tolower\(Id\) eq \'(.*)\'\) and IsLatestVersion/', $params['filter'], $output_array);
-        if(count($output_array) == 2) {
+        if(count($output_array) == 2) { // (--exact)
           $where .= ' AND versions.Version = packages.LatestVersion';
           $where .= ' AND packages.PackageId = LOWER( \'' . $output_array[1] . '\' )'; 
-        } else {
-          throw new Exception('Unknown filter "' . $params['filter'] . '"');
-        }
+					$searchDefault = false; 
+					break;
+				}
+					
+				preg_match('/substringof\(\'(.*)\',tolower\(Id\)\) and IsLatestVersion/', $params['filter'], $output_array);
+				if(count($output_array) == 2) { // Only search PackageId (--by-id-only)
+					$where .= ' AND versions.Version = packages.LatestVersion';
+					$where .= ' AND packages.PackageId like LOWER( :searchQuery )'; 
+					$query_params['searchQuery'] = '%' . $output_array[1] . '%';
+					$searchDefault = false; 
+					break;
+				}
+
+				preg_match('/substringof\(\'(.*)\',Tags\) and IsLatestVersion/', $params['filter'], $output_array);
+				if(count($output_array) == 2) { // Only search Tags (--by-tags-only)
+					$where .= ' AND versions.Version = packages.LatestVersion';
+					$words = explode(' ', $output_array[1]); // Split parameters by space
+					foreach($words as $word) {	// Packages must contain all tags specified
+						$where .= " AND versions.Tags LIKE '%{$word}%'";
+					}
+					$searchDefault = false; 
+					break;
+				}
+					
+				throw new Exception('Unknown filter "' . $params['filter'] . '"');
+		}
+
+		if (!empty($params['searchQuery']) && $searchDefault) {
+			$words = explode(' ', $params['searchQuery']); // Split parameters by space
+			foreach($words as $word) { // Packages must contain all parameters (id:, tag: or 'regular')
+				$tag = strpos($word,'tag:');
+				if($tag === false) {
+					$id = strpos($word,'id:');
+					if($id === false) { // 'Regular' parameter, should be (part of) Title, PackageId or Tags
+						$where .= " AND
+							(packages.Title LIKE '%{$word}%'
+							OR packages.PackageId LIKE '%{$word}%'
+							OR versions.Tags LIKE '%{$word}%')";	// Also search Tags
+					} else { // id: parameter, should be (part of) PackageId
+						// Search for id using 'id:' format
+						$word = str_replace("id:", "", $word);
+						$where .= " AND packages.PackageId LIKE '%{$word}%'";
+					}
+				} else { // tag: parameter, should be (part of) Tags
+					// Search for tag using 'tag:' format
+					$word = str_replace("tag:", "", $word);
+					$where .= " AND versions.Tags LIKE '%{$word}%'";
+				}
+			}
 		}
 
 		$order = static::parseOrderBy($params['orderBy']);
-
 		return static::doSearch($where, $order, $query_params, $pagination);
 	}
 
